@@ -114,7 +114,6 @@ namespace orb {
         };
 
     private:
-
     private:
         static uint32_t thread_count;
         std::vector<WorkerThread> threads;

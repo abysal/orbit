@@ -2,8 +2,10 @@
 #include "func_info.hpp"
 #include "orbit/query.hpp"
 #include "type_hash.hpp"
+#include "print"
 
 #include <limits>
+#include <ranges>
 #include <unordered_map>
 #include <vector>
 
@@ -57,6 +59,7 @@ namespace orb {
     namespace test {
         void fn(int, int, Query<int, float>) {
         }
+
         void fn2(Query<int, float>) {
         }
 
@@ -72,8 +75,9 @@ namespace orb {
 
         std::unordered_map<TypeHash, ComponentAccess> accesses{};
 
-        using seq = std::make_index_sequence<fn_info::arg_count>();
-        constexpr auto index_sequence = seq{};
+        static_assert(fn_info::arg_count > 0, "Cannot have 0 arg systems!");
+
+        using seq = std::make_index_sequence<fn_info::arg_count>;
 
         auto access_compute_lambda = [&]<size_t index>() {
             if (index < start_index) {
@@ -84,16 +88,77 @@ namespace orb {
             // A std tuple of types the query consumes
             using comp = q::components;
             constexpr size_t comp_count = q::queried_types;
+
+            using copm_seq = std::make_integer_sequence<size_t, comp_count>;
+
+            auto query_hasher = [&]<size_t I>() {
+                using t = std::tuple_element_t<I, comp>;
+                constexpr static auto hash = type_hash<stored_type_t<t>>();
+                if (accesses.contains(hash)) {
+                    return;
+                }
+
+                constexpr static auto access = compute_access<t>();
+                accesses.emplace(hash, access);
+            };
+
+            auto iterate = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                (query_hasher.template operator()<Is>(), ...);
+            };
+
+            iterate(copm_seq{});
         };
 
+        auto iterate = [&]<size_t... Is>(std::index_sequence<Is...>) {
+            (access_compute_lambda.template operator()<Is>(), ...);
+        };
 
+        iterate(seq());
 
+        SystemInfo info{};
+        info.raw_function_pointer = std::bit_cast<uintptr_t>(sys_pointer);
+
+        std::vector<ComponentAccess> flattened_accesses{};
+        flattened_accesses.reserve(accesses.size());
+
+        for (auto access : accesses | std::ranges::views::values) {
+            flattened_accesses.emplace_back(access);
+        }
+
+        info.system_accesses = std::move(flattened_accesses);
+
+        return info;
     }
 
     template <typename... Args>
-    ScheduleBatch compute_system_batch(Args... funcs) {
+    ScheduleBatch compute_schedule_batch(Args... funcs) {
         constexpr static auto func_count = sizeof...(funcs);
-        std::vector<ScheduleBatch> schedule_batches{};
-        schedule_batches.resize(func_count);
+        std::vector<SystemInfo> system_batches{};
+        system_batches.reserve(func_count);
+
+        (system_batches.emplace_back(std::move(compute_system_info<Args>(funcs))), ...);
+
+        std::unordered_map<TypeHash, bool> schedule_accesses{};
+
+        for (const auto& system : system_batches) {
+            for (const auto& access : system.system_accesses) {
+                if (schedule_accesses.contains(access.component_hash) && schedule_accesses.at(access.component_hash)) {
+                    continue;
+                }
+
+                schedule_accesses[access.component_hash] = access.is_mut_access;
+            }
+        }
+        std::vector<ComponentAccess> flattened_accesses{};
+        flattened_accesses.reserve(schedule_accesses.size());
+
+        for (const auto& [hash, mut] : schedule_accesses ) {
+            flattened_accesses.emplace_back(hash, mut);
+        }
+
+        ScheduleBatch batch{};
+        batch.batch_accesses = std::move(flattened_accesses);
+        batch.batch_systems = std::move(system_batches);
+        return batch;
     }
 } // namespace orb

@@ -15,7 +15,7 @@ namespace orb::impl {
     struct FunctionInfo<Return (*)(Args...)> {
         using return_type = Return;
         using arg_types = std::tuple<Args...>;
-        constexpr static auto arg_count = std::tuple_size_v<arg_types>;
+        constexpr static auto arg_count = sizeof...(Args);
         constexpr static auto fn_type = FuncType::Free;
 
         template <size_t Index>

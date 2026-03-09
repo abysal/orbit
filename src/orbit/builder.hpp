@@ -16,10 +16,9 @@ namespace orb {
         // be compatible with free function pointers
         template <typename... FuncTypes>
             requires((impl::free_function<FuncTypes> && ...))
-        Builder& system(Schedule sched, FuncTypes... functions) {
-
-
-
+        Builder& system(const Schedule sched, FuncTypes... functions) {
+            auto batch = compute_schedule_batch<FuncTypes...>(functions...);
+            this->m_schedule_batches[sched].emplace_back(std::move(batch));
             return *this;
         }
 

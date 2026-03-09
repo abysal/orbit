@@ -14,7 +14,8 @@
 namespace orb {
     class TypeHash;
     namespace impl {
-        TypeHash create_type_hash(size_t hash);
+        constexpr TypeHash create_type_hash(size_t hash);
+
         constexpr uint64_t fnv1a_hash(const std::string_view str) {
             uint64_t hash = 14695981039346656037ull;
             for (const char c : str) {
@@ -27,36 +28,48 @@ namespace orb {
 
     class TypeHash {
     public:
-        TypeHash() = default;
-        TypeHash(const TypeHash&) = default;
-        TypeHash& operator=(const TypeHash&) = default;
-        TypeHash(TypeHash&&) = default;
-        TypeHash& operator=(TypeHash&&) = default;
-        ~TypeHash() = default;
+        constexpr TypeHash() = default;
+        constexpr TypeHash(const TypeHash&) = default;
+        constexpr TypeHash& operator=(const TypeHash&) = default;
+        constexpr TypeHash(TypeHash&&) = default;
+        constexpr TypeHash& operator=(TypeHash&&) = default;
+        constexpr ~TypeHash() = default;
 
-        friend TypeHash impl::create_type_hash(size_t hash);
+        friend constexpr TypeHash impl::create_type_hash(size_t hash);
 
-        explicit operator size_t() const {
+        constexpr explicit operator size_t() const {
             return this->m_type_hash;
         }
 
-        bool operator==(const TypeHash& rhs) const noexcept = default;
-        bool operator!=(const TypeHash& rhs) const noexcept = default;
-        auto operator<=>(const TypeHash& rhs) const noexcept = default;
+        constexpr bool operator==(const TypeHash& rhs) const noexcept = default;
+        constexpr bool operator!=(const TypeHash& rhs) const noexcept = default;
+        constexpr auto operator<=>(const TypeHash& rhs) const noexcept = default;
 
     private:
-        explicit TypeHash(const size_t hash) : m_type_hash(hash) {
+        constexpr explicit TypeHash(const size_t hash) : m_type_hash(hash) {
         }
 
     private:
         size_t m_type_hash{};
     };
 
-    template <typename>
+    namespace impl {
+        constexpr TypeHash create_type_hash(size_t hash) {
+            return TypeHash(hash);
+        }
+    }
+
+    template <typename T_T>
     consteval static TypeHash type_hash() {
         constexpr auto hash = impl::fnv1a_hash(FUNCTION_NAME);
         constexpr auto out = static_cast<size_t>(hash);
         return impl::create_type_hash(out);
+    }
+
+    template <typename T_T>
+    constexpr static std::string_view type_of() {
+        constexpr static auto name = FUNCTION_NAME;
+        return std::string_view{name};
     }
 } // namespace orb
 

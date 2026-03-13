@@ -22,6 +22,7 @@ namespace orb {
             return *this;
         }
 
+        void run();
     private:
         SchedulesStorage<std::vector<ScheduleBatch>> m_schedule_batches{};
     };

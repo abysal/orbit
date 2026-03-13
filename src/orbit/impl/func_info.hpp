@@ -40,8 +40,16 @@ namespace orb::impl {
     FuncInfoDecl(const);
     FuncInfoDecl(noexcept);
     FuncInfoDecl(const noexcept);
+    FuncInfoDecl(&);
+    FuncInfoDecl(const&);
+    FuncInfoDecl(& noexcept);
+    FuncInfoDecl(const& noexcept);
+    FuncInfoDecl(&&);
+    FuncInfoDecl(const&&);
+    FuncInfoDecl(&& noexcept);
+    FuncInfoDecl(const&& noexcept);
 #undef FuncInfoDecl
 
-    template<typename T>
+    template <typename T>
     constexpr static bool free_function = FunctionInfo<T>::fn_type == FuncType::Free;
-} // namespace orb
+} // namespace orb::impl

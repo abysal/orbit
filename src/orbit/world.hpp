@@ -15,14 +15,13 @@ namespace orb {
         World& operator=(const World&) = delete;
         World& operator=(World&&) = delete;
 
-
-
         template<typename... Args>
         auto view(std::type_identity<Query<Args...>>) {
             return this->m_world_registry.view<stored_type_t<Args>...>();
         }
     private:
         entt::registry m_world_registry{};
+        friend class Builder;
     };
 
 

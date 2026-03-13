@@ -4,11 +4,15 @@ namespace orb {
     void Builder::run() {
         World w{};
 
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 10; i++) {
             auto e = w.m_world_registry.create();
             w.m_world_registry.emplace_or_replace<Position>(e, static_cast<float>(i));
-            w.m_world_registry.emplace_or_replace<Velocity>(e, static_cast<float>(i) * 0.5f);
-            w.m_world_registry.emplace_or_replace<Acceleration>(e, static_cast<float>(i) * 0.5f);
+            w.m_world_registry.emplace_or_replace<Velocity>(
+                e, static_cast<float>(i) * 0.5f
+            );
+            w.m_world_registry.emplace_or_replace<Acceleration>(
+                e, static_cast<float>(i) * 0.5f
+            );
             w.m_world_registry.emplace_or_replace<Health>(e, 30.f);
         }
 
@@ -24,9 +28,12 @@ namespace orb {
             allocations.emplace_back(raw_view_mem);
         }
 
-        for (const auto& [alloc, batch] :
-             std::views::zip(allocations, this->m_schedule_batches[FixedUpdate])) {
-            batch.invoke_function(c, alloc, batch);
+        while (true) {
+            for (const auto& [alloc, batch] :
+                 std::views::zip(allocations, this->m_schedule_batches[FixedUpdate])) {
+                batch.view_allocation_function(c, alloc);
+                batch.invoke_function(c, alloc, batch);
+            }
         }
     }
 } // namespace orb

@@ -15,14 +15,16 @@
 namespace orb {
     // TODO: Handle exclusions
 
-    template<typename>
-    struct print_type;
-
-    using schedule_batch_invoke_function = void (*)(SystemInvokeContext&);
+    struct ScheduleBatch;
+    using schedule_batch_invoke_function =
+        void (*)(SystemInvokeContext& context, void* raw_memory, ScheduleBatch& batch);
     using schedule_batch_allocate_views =
         void (*)(SystemInvokeContext&, void* raw_memory);
     using generic_deleter = void (*)(void*);
     using query_deleter = generic_deleter;
+
+    template <typename>
+    struct print_type;
 
     struct ComponentAccess {
         TypeHash component_hash{};
@@ -48,28 +50,19 @@ namespace orb {
         using qs = std::tuple<Queries...>;
         constexpr static auto queries_count = sizeof...(Queries);
 
-        using entt_views = decltype([] {
-            auto view_producer = []<typename... T>(std::type_identity<Query<T...>>) {
-                entt::registry r{};
-                return r.view<stored_type_t<T>...>();
-            };
-
-            auto iterator = [&]<typename... Q>() {
-                return std::make_tuple(view_producer(std::type_identity<Q>{})...);
-            };
-            auto result = iterator.template operator()<Queries...>();
-            return result;
-        }());
+        using entt_views = std::tuple<typename Queries::view_type...>;
 
         // raw_location must be a pointer to UNINITIALIZED MEMORY of the correct size to
         // store the views.
-        ORB_FORCE_INLINE static void
-        perform_view_generation(SystemInvokeContext& context, entt_views* raw_location) {
+        ORB_FORCE_INLINE static void perform_view_generation(
+            const SystemInvokeContext& context, entt_views* raw_location
+        ) {
             auto* views = new (raw_location) entt_views;
 
             [&]<size_t... Is>(std::index_sequence<Is...>) {
-                ((std::get<Is>(*views) =
-                      context.world.view(std::type_identity<std::tuple_element_t<Is, qs>>{})),
+                ((std::get<Is>(*views) = context.world.view(
+                      std::type_identity<std::tuple_element_t<Is, qs>>{}
+                  )),
                  ...);
             }(std::make_index_sequence<sizeof...(Queries)>{});
         }
@@ -200,12 +193,6 @@ namespace orb {
         using query_info = SystemQueryInfo<Qs...>;
     };
 
-
-    /*
-        schedule_batch_invoke_function invoke_function{ nullptr };
-        query_deleter query_deleter{ nullptr };
-        size_t query_reserve_size{};
-     */
     template <typename... SystemPointerTypes>
     struct ScheduleBatchInfo {
         // This insanity of an expression basically turns the raw function pointer types
@@ -222,9 +209,12 @@ namespace orb {
                 >::query_info...
             >;
         // clang-format on
+        using pointer_types = std::tuple<SystemPointerTypes...>;
 
         constexpr static size_t view_allocation_size = [] constexpr {
-            auto l = []<typename... SysInfo>(std::type_identity<std::tuple<SysInfo...>>) constexpr {
+            auto l = []<typename... SysInfo>(
+                         std::type_identity<std::tuple<SysInfo...>>
+                     ) constexpr {
                 size_t result{ 0 };
 
                 static_assert(sizeof...(SysInfo) != 0);
@@ -243,7 +233,9 @@ namespace orb {
 
         static void
         perform_view_generation(SystemInvokeContext& context, void* raw_view_memory) {
-            auto l = [&]<typename... SysInfo>(std::type_identity<std::tuple<SysInfo...>>) {
+            auto l = [&]<typename... SysInfo>(
+                         std::type_identity<std::tuple<SysInfo...>>
+                     ) {
                 auto* raw_view_mem_cast = static_cast<uint8_t*>(raw_view_memory);
 
                 // Per system, we have, we invoke its view generator, then advance to the
@@ -257,6 +249,61 @@ namespace orb {
             };
 
             l(std::type_identity<query_info>{});
+        }
+
+        template <typename FnType, typename SystemInfo>
+        static void invoke_single_system(
+            FnType sys_ptr, SystemInfo::entt_views* raw_memory,
+            SystemInvokeContext& context
+        ) {
+            using qs = typename SystemInfo::qs;
+            qs queries{};
+
+            const auto seq = std::make_index_sequence<std::tuple_size_v<qs>>();
+
+            auto query_invoke = [&]<size_t I>() {
+                using q = std::tuple_element_t<I, qs>;
+                auto& entt_q = std::get<I>(*raw_memory);
+                std::get<I>(queries) = std::move(q{ entt_q });
+            };
+
+            auto query_loop = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                (query_invoke.template operator()<Is>(), ...);
+            };
+
+            query_loop(seq);
+
+            constexpr static auto q_apply_index = query_start_index<FnType>();
+
+            // TODO: Add support for the things required, like resources
+            std::apply(sys_ptr, std::move(queries));
+        }
+
+        static void perform_system_execution(
+            SystemInvokeContext& context, void* raw_memory, ScheduleBatch& batch
+        ) {
+            auto* memory_advanced = static_cast<uint8_t*>(raw_memory);
+            auto invoke = [&]<size_t I>() {
+                using pointer_type = std::tuple_element_t<I, pointer_types>;
+                using sys_info = std::tuple_element_t<I, query_info>;
+
+                const auto& b = batch.batch_systems[I];
+                auto p = b.raw_function_pointer;
+                auto pointer = std::bit_cast<pointer_type>(p);
+
+                invoke_single_system<pointer_type, sys_info>(
+                    pointer,
+                    reinterpret_cast<typename sys_info::entt_views*>(memory_advanced),
+                    context
+                );
+                memory_advanced += sizeof(typename sys_info::entt_views);
+            };
+
+            auto loop = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                ((invoke.template operator()<Is>()), ...);
+            };
+
+            loop(std::make_index_sequence<sizeof...(SystemPointerTypes)>{});
         }
     };
 
@@ -280,6 +327,7 @@ namespace orb {
                 schedule_accesses[access.component_hash] = access.is_mut_access;
             }
         }
+
         std::vector<ComponentAccess> flattened_accesses{};
         flattened_accesses.reserve(schedule_accesses.size());
 
@@ -295,6 +343,7 @@ namespace orb {
 
         batch.query_reserve_size = batch_info::view_allocation_size;
         batch.view_allocation_function = &batch_info::perform_view_generation;
+        batch.invoke_function = &batch_info::perform_system_execution;
 
         return batch;
     }

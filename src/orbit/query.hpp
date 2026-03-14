@@ -62,7 +62,7 @@ namespace orb {
         Query& operator=(Query&&) = default;
         ~Query() = default;
 
-        class Iterator {
+        class ComponentIterator {
         public:
             using iterator_category = std::forward_iterator_tag;
             using value_type = it_ret;
@@ -70,7 +70,7 @@ namespace orb {
             using pointer = it_ret*;
             using reference = it_ret&;
 
-            explicit Iterator(view_type& view, const bool begin) : m_v(&view) {
+            explicit ComponentIterator(view_type& view, const bool begin) : m_v(&view) {
                 if (begin) {
                     it = view.begin();
                 } else {
@@ -85,31 +85,109 @@ namespace orb {
                 );
             }
 
-            Iterator& operator++() {
+            ComponentIterator& operator++() {
                 ++it;
                 return *this;
             }
 
-            Iterator operator++(int) {
-                Iterator tmp = *this;
+            ComponentIterator operator++(int) {
+                ComponentIterator tmp = *this;
                 ++(*this);
                 return tmp;
             }
 
-            bool operator==(const Iterator& other) const { return it == other.it; }
-            bool operator!=(const Iterator& other) const { return it != other.it; }
+            bool operator==(const ComponentIterator& other) const {
+                return it == other.it;
+            }
+            bool operator!=(const ComponentIterator& other) const {
+                return it != other.it;
+            }
+
         private:
             view_type::iterator it{};
             view_type* m_v{};
         };
 
-        Iterator begin() {
-            return Iterator(*this->m_view, true);
+        ComponentIterator begin() {
+            return ComponentIterator(*this->m_view, true);
         }
-        Iterator end() {
-            return Iterator(*this->m_view, false);
+        ComponentIterator end() {
+            return ComponentIterator(*this->m_view, false);
         }
 
+        [[nodiscard]] bool empty() const {
+            return this->m_view == nullptr || this->m_view->size_hint() == 0;
+        }
+
+        class EntityIterator {
+        public:
+            using iterator_category = std::forward_iterator_tag;
+            using value_type = Entity;
+            using difference_type = std::ptrdiff_t;
+            using pointer = Entity*;
+            using reference = Entity&;
+
+            explicit EntityIterator(view_type& view, const bool begin) : m_v(&view) {
+                if (begin) {
+                    it = view.begin();
+                } else {
+                    it = view.end();
+                }
+            }
+
+            Entity operator*() const {
+                auto entity = *it;
+                return entity;
+            }
+
+            EntityIterator& operator++() {
+                ++it;
+                return *this;
+            }
+
+            EntityIterator operator++(int) {
+                EntityIterator tmp = *this;
+                ++(*this);
+                return tmp;
+            }
+
+            bool operator==(const EntityIterator& other) const {
+                return it == other.it;
+            }
+            bool operator!=(const EntityIterator& other) const {
+                return it != other.it;
+            }
+
+        private:
+            view_type::iterator it{};
+            view_type* m_v{};
+        };
+
+        it_ret get_components(Entity entity) const {
+            return std::tuple<ref_type<stored_type_t<Args>>...>(
+                this->m_view->template get<stored_type_t<Args>>(entity)...
+            );
+        }
+
+        it_ret operator[](const Entity entity) const {
+            return this->get_components(entity);
+        }
+
+        struct EntityIteratorWrapper {
+            view_type* owner;
+
+            auto begin() const {
+                return EntityIterator{*owner, true};
+            }
+
+            auto end() const {
+                return EntityIterator{*owner, false};
+            }
+        };
+
+        EntityIteratorWrapper entities() {
+            return EntityIteratorWrapper{this->m_view};
+        }
     private:
         view_type* m_view{ nullptr };
     };

@@ -3,26 +3,8 @@
 #include "impl/func_info.hpp"
 #include "schedules.hpp"
 
+#include <chrono>
 #include <vector>
-struct Position {
-    float x{};
-    float y{};
-};
-
-struct Velocity {
-    float x{};
-    float y{};
-};
-
-struct Acceleration {
-    float x{};
-    float y{};
-};
-
-struct Health {
-    float health{};
-};
-
 
 namespace orb {
 
@@ -41,9 +23,19 @@ namespace orb {
             return *this;
         }
 
+        Builder& fixed_update_time(std::chrono::milliseconds time);
+
         void run();
+
+    private:
+        // We can't inline this function ever, since it does dynamic stack allocations,
+        // which could cause a stack overflow if not freed which only happens on func
+        // return
+        ORB_NEVER_INLINE void run_setup_systems(SystemInvokeContext& c);
+
     private:
         SchedulesStorage<std::vector<ScheduleBatch>> m_schedule_batches{};
+        std::chrono::milliseconds m_fixed_update_tick_size{std::chrono::milliseconds{50}};
     };
 
 } // namespace orb

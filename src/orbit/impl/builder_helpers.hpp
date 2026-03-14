@@ -24,6 +24,20 @@ namespace orb {
     using query_deleter = generic_deleter;
 
     template <typename>
+    struct is_world_access : std::false_type {};
+
+    template <typename T>
+        requires std::same_as<World&, T>
+    struct is_world_access<T> : std::true_type {};
+
+    template <typename T>
+        requires std::same_as<const World&, T>
+    struct is_world_access<T> : std::true_type {};
+
+    template <typename T>
+    constexpr static bool is_world_access_v = is_world_access<T>::value;
+
+    template <typename>
     struct print_type;
 
     struct ComponentAccess {
@@ -119,6 +133,7 @@ namespace orb {
         // From this index onwards, all args are queries
         using fn_info = impl::FunctionInfo<T>;
         constexpr auto start_index = query_start_index<T>();
+        // print_type<std::integral_constant<size_t, start_index>>{};
 
         std::unordered_map<TypeHash, ComponentAccess> accesses{};
 
@@ -127,33 +142,33 @@ namespace orb {
         using seq = std::make_index_sequence<fn_info::arg_count>;
 
         auto access_compute_lambda = [&]<size_t index>() {
-            if (index < start_index) {
+            if constexpr (index < start_index) {
                 return;
+            } else {
+                using q = fn_info::template ArgType<index>;
+                // A std tuple of types the query consumes
+                using comp = q::components;
+                constexpr size_t comp_count = q::queried_types;
+
+                using copm_seq = std::make_integer_sequence<size_t, comp_count>;
+
+                auto query_hasher = [&]<size_t I>() {
+                    using t = std::tuple_element_t<I, comp>;
+                    constexpr static auto hash = type_hash<stored_type_t<t>>();
+                    if (accesses.contains(hash)) {
+                        return;
+                    }
+
+                    constexpr static auto access = compute_access<t>();
+                    accesses.emplace(hash, access);
+                };
+
+                auto iterate = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    (query_hasher.template operator()<Is>(), ...);
+                };
+
+                iterate(copm_seq{});
             }
-
-            using q = fn_info::template ArgType<index>;
-            // A std tuple of types the query consumes
-            using comp = q::components;
-            constexpr size_t comp_count = q::queried_types;
-
-            using copm_seq = std::make_integer_sequence<size_t, comp_count>;
-
-            auto query_hasher = [&]<size_t I>() {
-                using t = std::tuple_element_t<I, comp>;
-                constexpr static auto hash = type_hash<stored_type_t<t>>();
-                if (accesses.contains(hash)) {
-                    return;
-                }
-
-                constexpr static auto access = compute_access<t>();
-                accesses.emplace(hash, access);
-            };
-
-            auto iterate = [&]<size_t... Is>(std::index_sequence<Is...>) {
-                (query_hasher.template operator()<Is>(), ...);
-            };
-
-            iterate(copm_seq{});
         };
 
         auto iterate = [&]<size_t... Is>(std::index_sequence<Is...>) {
@@ -256,27 +271,66 @@ namespace orb {
             FnType sys_ptr, SystemInfo::entt_views* raw_memory,
             SystemInvokeContext& context
         ) {
+            using fn_info = impl::FunctionInfo<FnType>;
+            using fn_args = fn_info::arg_types;
             using qs = typename SystemInfo::qs;
-            qs queries{};
-
-            const auto seq = std::make_index_sequence<std::tuple_size_v<qs>>();
-
-            auto query_invoke = [&]<size_t I>() {
-                using q = std::tuple_element_t<I, qs>;
-                auto& entt_q = std::get<I>(*raw_memory);
-                std::get<I>(queries) = std::move(q{ entt_q });
-            };
-
-            auto query_loop = [&]<size_t... Is>(std::index_sequence<Is...>) {
-                (query_invoke.template operator()<Is>(), ...);
-            };
-
-            query_loop(seq);
-
+            const auto arg_seq = std::make_index_sequence<fn_info::arg_count>();
             constexpr static auto q_apply_index = query_start_index<FnType>();
 
+            fn_args args = [&] {
+                auto l = [&]<size_t I>() {
+                    using arg_type = std::tuple_element_t<I, fn_args>;
+
+                    if constexpr (is_world_access_v<arg_type>) {
+                        return std::reference_wrapper{ context.world };
+                    } else if constexpr (is_query_v<arg_type>) {
+                        return arg_type{};
+                    }
+
+                    std::unreachable();
+                };
+
+                auto arg_application = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    return std::make_tuple((l.template operator()<Is>())...);
+                };
+
+                return arg_application(arg_seq);
+            }();
+
+            if constexpr (q_apply_index != std::numeric_limits<size_t>::max()) {
+                qs queries{};
+
+                const auto seq = std::make_index_sequence<std::tuple_size_v<qs>>();
+
+                auto query_invoke = [&]<size_t I>() {
+                    using q = std::tuple_element_t<I, qs>;
+                    auto& entt_q = std::get<I>(*raw_memory);
+                    std::get<I>(queries) = std::move(q{ entt_q });
+                };
+
+                auto query_loop = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    (query_invoke.template operator()<Is>(), ...);
+                };
+
+                query_loop(seq);
+
+                // moves the queries into the correct slots in the args
+                auto query_move = [&]<size_t I>() {
+                    if constexpr (I >= q_apply_index) {
+                        constexpr static auto query_index = I - q_apply_index;
+                        std::get<I>(args) = std::move(std::get<query_index>(queries));
+                    }
+                };
+
+                auto query_move_loop = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                    (query_move.template operator()<Is>(), ...);
+                };
+
+                query_move_loop(arg_seq);
+            }
+
             // TODO: Add support for the things required, like resources
-            std::apply(sys_ptr, std::move(queries));
+            std::apply(sys_ptr, std::move(args));
         }
 
         static void perform_system_execution(

@@ -1,12 +1,13 @@
 #pragma once
 #include "func_info.hpp"
+#include "orbit/event.hpp"
 #include "orbit/query.hpp"
+#include "orbit/resource.hpp"
 #include "orbit/world.hpp"
 #include "platform.hpp"
 #include "type_hash.hpp"
 
 #include <entt/entity/registry.hpp>
-#include <entt/entity/view.hpp>
 #include <limits>
 #include <ranges>
 #include <unordered_map>
@@ -39,6 +40,11 @@ namespace orb {
 
     template <typename>
     struct print_type;
+
+    struct ComputeContext {
+        EventManager& event_manager;
+        Schedule schedule{};
+    };
 
     struct ComponentAccess {
         TypeHash component_hash{};
@@ -129,11 +135,10 @@ namespace orb {
     } // namespace test
 
     template <typename T>
-    SystemInfo compute_system_info(T sys_pointer) {
+    SystemInfo compute_system_info(ComputeContext& context, T sys_pointer) {
         // From this index onwards, all args are queries
         using fn_info = impl::FunctionInfo<T>;
-        constexpr auto start_index = query_start_index<T>();
-        // print_type<std::integral_constant<size_t, start_index>>{};
+        constexpr auto q_start_index = query_start_index<T>();
 
         std::unordered_map<TypeHash, ComponentAccess> accesses{};
 
@@ -142,8 +147,13 @@ namespace orb {
         using seq = std::make_index_sequence<fn_info::arg_count>;
 
         auto access_compute_lambda = [&]<size_t index>() {
-            if constexpr (index < start_index) {
-                return;
+            if constexpr (index < q_start_index) {
+                using a = fn_info::template ArgType<index>;
+
+                if constexpr (is_event_handler_v<a>) {
+                    using event_type = a::event_type;
+                    context.event_manager.register_event<event_type>(context.schedule);
+                }
             } else {
                 using q = fn_info::template ArgType<index>;
                 // A std tuple of types the query consumes
@@ -285,9 +295,12 @@ namespace orb {
                         return std::reference_wrapper{ context.world };
                     } else if constexpr (is_query_v<arg_type>) {
                         return arg_type{};
-                    }
-
-                    std::unreachable();
+                    } else if constexpr (is_res_v<arg_type>) {
+                        return arg_type{};
+                    } else if constexpr (is_event_handler_v<arg_type>) {
+                        return arg_type{};
+                    } else
+                        static_assert(std::false_type::value, "Function argument was not one of the allowed types, EventReader/Writer, Query, World&, Res/MutRes");
                 };
 
                 auto arg_application = [&]<size_t... Is>(std::index_sequence<Is...>) {
@@ -359,15 +372,32 @@ namespace orb {
 
             loop(std::make_index_sequence<sizeof...(SystemPointerTypes)>{});
         }
+
+        static void perform_view_deletion(void* raw_memory) {
+            auto* memory_advanced = static_cast<uint8_t*>(raw_memory);
+            auto invoke = [&]<size_t I>() {
+                using pointer_type = std::tuple_element_t<I, pointer_types>;
+                using sys_info = std::tuple_element_t<I, query_info>;
+
+                sys_info::delete_queries(reinterpret_cast<void*>(memory_advanced));
+                memory_advanced += sizeof(typename sys_info::entt_views);
+            };
+
+            auto loop = [&]<size_t... Is>(std::index_sequence<Is...>) {
+                ((invoke.template operator()<Is>()), ...);
+            };
+
+            loop(std::make_index_sequence<sizeof...(SystemPointerTypes)>{});
+        }
     };
 
     template <typename... Args>
-    ScheduleBatch compute_schedule_batch(Args... funcs) {
+    ScheduleBatch compute_schedule_batch(ComputeContext& context, Args... funcs) {
         constexpr static auto func_count = sizeof...(funcs);
         std::vector<SystemInfo> system_batches{};
         system_batches.reserve(func_count);
 
-        (system_batches.emplace_back(std::move(compute_system_info<Args>(funcs))), ...);
+        (system_batches.emplace_back(std::move(compute_system_info<Args>(context, funcs))), ...);
 
         std::unordered_map<TypeHash, bool> schedule_accesses{};
 
@@ -398,6 +428,7 @@ namespace orb {
         batch.query_reserve_size = batch_info::view_allocation_size;
         batch.view_allocation_function = &batch_info::perform_view_generation;
         batch.invoke_function = &batch_info::perform_system_execution;
+        batch.query_deleter = &batch_info::perform_view_deletion;
 
         return batch;
     }

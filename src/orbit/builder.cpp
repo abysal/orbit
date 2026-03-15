@@ -3,7 +3,7 @@
 #include <bits/this_thread_sleep.h>
 
 namespace orb {
-    Builder& Builder::fixed_update_time(std::chrono::milliseconds time) {
+    Builder& Builder::fixed_update_time(const std::chrono::milliseconds time) {
         this->m_fixed_update_tick_size = time;
         return *this;
     }
@@ -15,7 +15,6 @@ namespace orb {
 
         this->run_setup_systems(c);
 
-        // TODO: Make this way smarter and handle multiple schedules
         std::vector<void*> allocations{};
         allocations.reserve(this->m_schedule_batches[FixedUpdate].size());
 
@@ -26,11 +25,16 @@ namespace orb {
 
         while (true) {
             const auto current_time = std::chrono::steady_clock::now();
+
             for (const auto& [alloc, batch] :
                  std::views::zip(allocations, this->m_schedule_batches[FixedUpdate])) {
                 batch.view_allocation_function(c, alloc);
                 batch.invoke_function(c, alloc, batch);
+                batch.query_deleter(alloc);
             }
+
+            this->m_events.clear_schedule(FixedUpdate);
+
             const auto end_time = std::chrono::steady_clock::now();
 
             const auto diff = end_time - current_time;
@@ -55,6 +59,9 @@ namespace orb {
         for (const auto& [alloc, batch] :
              std::views::zip(allocations, this->m_schedule_batches[Startup])) {
             batch.invoke_function(c, alloc, batch);
+            batch.query_deleter(alloc);
         }
+
+        this->m_events.clear_schedule(Startup);
     }
 } // namespace orb

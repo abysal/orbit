@@ -1,4 +1,5 @@
 #pragma once
+#include "event.hpp"
 #include "impl/builder_helpers.hpp"
 #include "impl/func_info.hpp"
 #include "schedules.hpp"
@@ -18,7 +19,8 @@ namespace orb {
         template <typename... FuncTypes>
             requires((impl::free_function<FuncTypes> && ...))
         Builder& system(const Schedule sched, FuncTypes... functions) {
-            auto batch = compute_schedule_batch<FuncTypes...>(functions...);
+            ComputeContext context{ .event_manager = this->m_events, .schedule = sched };
+            auto batch = compute_schedule_batch<FuncTypes...>(context, functions...);
             this->m_schedule_batches[sched].emplace_back(std::move(batch));
             return *this;
         }
@@ -35,7 +37,9 @@ namespace orb {
 
     private:
         SchedulesStorage<std::vector<ScheduleBatch>> m_schedule_batches{};
-        std::chrono::milliseconds m_fixed_update_tick_size{std::chrono::milliseconds{50}};
+        std::chrono::milliseconds m_fixed_update_tick_size{ std::chrono::milliseconds{
+            50 } };
+        EventManager m_events{};
     };
 
 } // namespace orb

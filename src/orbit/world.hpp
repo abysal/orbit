@@ -43,10 +43,17 @@ namespace orb {
             this->remove(entity.m_entity);
         }
 
-        template<typename... Args>
-        auto view(std::type_identity<Query<Args...>>) {
-            return this->m_world_registry.view<stored_type_t<Args>...>();
+        template<typename Query, typename Exclusion>
+        auto view(Exclusion exclusion) {
+            return this->view_impl<Exclusion>(std::type_identity<typename Query::components>{}, exclusion);
         }
+
+    private:
+        template<typename Exclusion, typename... Args>
+        auto view_impl(std::type_identity<std::tuple<Args...>>, Exclusion exclusion) {
+            return this->m_world_registry.view<no_const_stored_type_t<Args>...>(exclusion);
+        }
+
     private:
         entt::registry m_world_registry{};
         friend class Builder;

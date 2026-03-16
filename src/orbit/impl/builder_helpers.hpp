@@ -80,8 +80,8 @@ namespace orb {
             auto* views = new (raw_location) entt_views;
 
             [&]<size_t... Is>(std::index_sequence<Is...>) {
-                ((std::get<Is>(*views) = context.world.view(
-                      std::type_identity<std::tuple_element_t<Is, qs>>{}
+                ((std::get<Is>(*views) = context.world.view<std::tuple_element_t<Is, qs>>(
+                      std::tuple_element_t<Is, qs>::exclude_mask::exclusion
                   )),
                  ...);
             }(std::make_index_sequence<sizeof...(Queries)>{});
@@ -160,7 +160,7 @@ namespace orb {
                 using comp = q::components;
                 constexpr size_t comp_count = q::queried_types;
 
-                using copm_seq = std::make_integer_sequence<size_t, comp_count>;
+                using comp_seq = std::make_integer_sequence<size_t, comp_count>;
 
                 auto query_hasher = [&]<size_t I>() {
                     using t = std::tuple_element_t<I, comp>;
@@ -177,7 +177,7 @@ namespace orb {
                     (query_hasher.template operator()<Is>(), ...);
                 };
 
-                iterate(copm_seq{});
+                iterate(comp_seq{});
             }
         };
 
@@ -300,7 +300,11 @@ namespace orb {
                     } else if constexpr (is_event_handler_v<arg_type>) {
                         return arg_type{};
                     } else
-                        static_assert(std::false_type::value, "Function argument was not one of the allowed types, EventReader/Writer, Query, World&, Res/MutRes");
+                        static_assert(
+                            std::false_type::value,
+                            "Function argument was not one of the allowed types, "
+                            "EventReader/Writer, Query, World&, Res/MutRes"
+                        );
                 };
 
                 auto arg_application = [&]<size_t... Is>(std::index_sequence<Is...>) {
@@ -397,7 +401,10 @@ namespace orb {
         std::vector<SystemInfo> system_batches{};
         system_batches.reserve(func_count);
 
-        (system_batches.emplace_back(std::move(compute_system_info<Args>(context, funcs))), ...);
+        (system_batches.emplace_back(
+             std::move(compute_system_info<Args>(context, funcs))
+         ),
+         ...);
 
         std::unordered_map<TypeHash, bool> schedule_accesses{};
 

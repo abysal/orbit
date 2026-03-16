@@ -11,7 +11,7 @@ namespace orb {
 
     class Builder {
     public:
-        // This forces a free function only to allow for some the storage of the function
+        // This forces a free function only to allow for the storage of the function
         // pointer with an uintptr_t
 
         // Registers N systems to be executed when the Scheduler executes. Functions must

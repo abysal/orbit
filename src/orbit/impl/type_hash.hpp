@@ -66,6 +66,13 @@ namespace orb {
         return impl::create_type_hash(out);
     }
 
+    template<auto Data>
+    consteval static TypeHash nttp_hash() {
+        constexpr auto hash = impl::fnv1a_hash(FUNCTION_NAME);
+        constexpr auto out = static_cast<size_t>(hash);
+        return impl::create_type_hash(out);
+    }
+
     template <typename T_T>
     constexpr static std::string_view type_of() {
         constexpr static auto name = FUNCTION_NAME;

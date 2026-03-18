@@ -9,18 +9,41 @@
 
 namespace orb {
 
+
+    template <auto Fn>
+    consteval static SystemID sys_id() {
+        return nttp_hash<Fn>();
+    }
+
+    namespace impl {
+        template<auto... Fns>
+        struct Wrapper {
+
+        };
+    }
+
+    template<auto... Fns>
+    consteval static SystemID folded_id() {
+        return sys_id<impl::Wrapper<Fns...>{}>();
+    }
+
     class Builder {
     public:
-        // This forces a free function only to allow for the storage of the function
-        // pointer with an uintptr_t
-
-        // Registers N systems to be executed when the Scheduler executes. Functions must
-        // be compatible with free function pointers
-        template <typename... FuncTypes>
-            requires((impl::free_function<FuncTypes> && ...))
-        Builder& system(const Schedule sched, FuncTypes... functions) {
+        template <auto... Fns>
+            requires((impl::free_function<decltype(Fns)> && ...))
+        Builder& seq_system(const Schedule sched) {
             ComputeContext context{ .event_manager = this->m_events, .schedule = sched };
-            auto batch = compute_schedule_batch<FuncTypes...>(context, functions...);
+            auto batch = compute_schedule_batch<Fns...>(context);
+            batch.system_id = folded_id<Fns...>();
+            this->m_schedule_batches[sched].emplace_back(std::move(batch));
+            return *this;
+        }
+
+        template<auto Fn>
+        Builder& system(const Schedule sched) {
+            ComputeContext context{ .event_manager = this->m_events, .schedule = sched };
+            auto batch = compute_schedule_batch<Fn>(context);
+            batch.system_id = sys_id<Fn>();
             this->m_schedule_batches[sched].emplace_back(std::move(batch));
             return *this;
         }

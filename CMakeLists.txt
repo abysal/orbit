@@ -26,6 +26,10 @@ if(NOT EnTT_FOUND)
 
 endif()
 
+option(ORB_DUMP_MERMAID "Enable dumping dependency graph to Mermaid format" ON)
+if(ORB_DUMP_MERMAID)
+    target_compile_definitions(orbit PUBLIC ORB_DUMP_MERMAID=1)
+endif()
 
 target_compile_features(orbit PUBLIC cxx_std_26)
 target_link_libraries(orbit PUBLIC EnTT::EnTT)
